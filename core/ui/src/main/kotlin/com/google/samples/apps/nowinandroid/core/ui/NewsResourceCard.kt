@@ -24,7 +24,6 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.draganddrop.dragAndDropSource
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -139,21 +138,17 @@ fun NewsResourceCardExpanded(
                             userNewsResource.title,
                             modifier = Modifier
                                 .fillMaxWidth((.8f))
-                                .dragAndDropSource {
-                                    detectTapGestures(
-                                        onLongPress = {
-                                            startTransfer(
-                                                DragAndDropTransferData(
-                                                    ClipData.newPlainText(
-                                                        sharingLabel,
-                                                        sharingContent,
-                                                    ),
-                                                    flags = dragAndDropFlags,
-                                                ),
-                                            )
-                                        },
-                                    )
-                                },
+                                .dragAndDropSource(
+                                    transferData = {
+                                        DragAndDropTransferData(
+                                            ClipData.newPlainText(
+                                                sharingLabel,
+                                                sharingContent,
+                                            ),
+                                            flags = dragAndDropFlags,
+                                        )
+                                    },
+                                ),
                         )
                         Spacer(modifier = Modifier.weight(1f))
                         BookmarkButton(isBookmarked, onToggleBookmark)

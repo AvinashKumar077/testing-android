@@ -18,6 +18,11 @@ package com.google.samples.apps.nowinandroid.ui.interests2pane
 
 import androidx.activity.compose.BackHandler
 import androidx.annotation.Keep
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Box
+import androidx.compose.material3.LocalMinimumInteractiveComponentSize
+import androidx.compose.material3.VerticalDragHandle
 import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
 import androidx.compose.material3.adaptive.WindowAdaptiveInfo
 import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
@@ -25,8 +30,10 @@ import androidx.compose.material3.adaptive.layout.AnimatedPane
 import androidx.compose.material3.adaptive.layout.ListDetailPaneScaffold
 import androidx.compose.material3.adaptive.layout.ListDetailPaneScaffoldRole
 import androidx.compose.material3.adaptive.layout.PaneAdaptedValue
+import androidx.compose.material3.adaptive.layout.PaneExpansionAnchor
 import androidx.compose.material3.adaptive.layout.ThreePaneScaffoldDestinationItem
 import androidx.compose.material3.adaptive.layout.calculatePaneScaffoldDirective
+import androidx.compose.material3.adaptive.layout.rememberPaneExpansionState
 import androidx.compose.material3.adaptive.navigation.ThreePaneScaffoldNavigator
 import androidx.compose.material3.adaptive.navigation.rememberListDetailPaneScaffoldNavigator
 import androidx.compose.runtime.Composable
@@ -34,11 +41,17 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.viewModelFactory
 import androidx.navigation.NavGraphBuilder
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -46,11 +59,16 @@ import androidx.navigation.compose.rememberNavController
 import com.google.samples.apps.nowinandroid.feature.interests.InterestsRoute
 import com.google.samples.apps.nowinandroid.feature.interests.navigation.InterestsRoute
 import com.google.samples.apps.nowinandroid.feature.topic.TopicDetailPlaceholder
+import com.google.samples.apps.nowinandroid.feature.topic.TopicScreen
+import com.google.samples.apps.nowinandroid.feature.topic.TopicViewModel
+import com.google.samples.apps.nowinandroid.feature.topic.TopicViewModel_Factory
 import com.google.samples.apps.nowinandroid.feature.topic.navigation.TopicRoute
 import com.google.samples.apps.nowinandroid.feature.topic.navigation.navigateToTopic
 import com.google.samples.apps.nowinandroid.feature.topic.navigation.topicScreen
+import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import java.util.UUID
+import kotlin.math.max
 
 @Serializable internal object TopicPlaceholderRoute
 
@@ -93,69 +111,125 @@ internal fun InterestsListDetailScreen(
             },
         ),
     )
+    val coroutineScope = rememberCoroutineScope()
+
+    val paneExpansionState = rememberPaneExpansionState(
+        anchors = listOf(
+            PaneExpansionAnchor.Proportion(0f),
+            PaneExpansionAnchor.Proportion(0.5f),
+            PaneExpansionAnchor.Proportion(1f),
+        ),
+    )
+
     BackHandler(listDetailNavigator.canNavigateBack()) {
-        listDetailNavigator.navigateBack()
+        coroutineScope.launch {
+            listDetailNavigator.navigateBack()
+        }
     }
 
     var nestedNavHostStartRoute by remember {
         val route = selectedTopicId?.let { TopicRoute(id = it) } ?: TopicPlaceholderRoute
         mutableStateOf(route)
     }
-    var nestedNavKey by rememberSaveable(
-        stateSaver = Saver({ it.toString() }, UUID::fromString),
-    ) {
-        mutableStateOf(UUID.randomUUID())
-    }
-    val nestedNavController = key(nestedNavKey) {
-        rememberNavController()
-    }
 
     fun onTopicClickShowDetailPane(topicId: String) {
         onTopicClick(topicId)
-        if (listDetailNavigator.isDetailPaneVisible()) {
-            // If the detail pane was visible, then use the nestedNavController navigate call
-            // directly
-            nestedNavController.navigateToTopic(topicId) {
-                popUpTo<DetailPaneNavHostRoute>()
-            }
-        } else {
-            // Otherwise, recreate the NavHost entirely, and start at the new destination
-            nestedNavHostStartRoute = TopicRoute(id = topicId)
-            nestedNavKey = UUID.randomUUID()
+        nestedNavHostStartRoute = TopicRoute(id = topicId)
+        coroutineScope.launch {
+            listDetailNavigator.navigateTo(ListDetailPaneScaffoldRole.Detail)
         }
-        listDetailNavigator.navigateTo(ListDetailPaneScaffoldRole.Detail)
     }
+
+    val mutableInteractionSource = remember { MutableInteractionSource() }
+    val minPaneWidth = 300.dp
 
     ListDetailPaneScaffold(
         value = listDetailNavigator.scaffoldValue,
         directive = listDetailNavigator.scaffoldDirective,
         listPane = {
             AnimatedPane {
-                InterestsRoute(
-                    onTopicClick = ::onTopicClickShowDetailPane,
-                    highlightSelectedTopic = listDetailNavigator.isDetailPaneVisible(),
-                )
+                Box(
+                    modifier = Modifier.clipToBounds()
+                        .layout { measurable, constraints ->
+                            val width = max(minPaneWidth.roundToPx(), constraints.maxWidth)
+                            val placeable = measurable.measure(
+                                constraints.copy(
+                                    minWidth = minPaneWidth.roundToPx(),
+                                    maxWidth = width,
+                                ),
+                            )
+                            layout(constraints.maxWidth, placeable.height) {
+                                placeable.placeRelative(
+                                    x = 0,
+                                    y = 0,
+                                )
+                            }
+                        },
+                ) {
+                    InterestsRoute(
+                        onTopicClick = ::onTopicClickShowDetailPane,
+                        highlightSelectedTopic = listDetailNavigator.isDetailPaneVisible(),
+                    )
+                }
             }
         },
         detailPane = {
             AnimatedPane {
-                key(nestedNavKey) {
-                    NavHost(
-                        navController = nestedNavController,
-                        startDestination = nestedNavHostStartRoute,
-                        route = DetailPaneNavHostRoute::class,
-                    ) {
-                        topicScreen(
-                            showBackButton = !listDetailNavigator.isListPaneVisible(),
-                            onBackClick = listDetailNavigator::navigateBack,
-                            onTopicClick = ::onTopicClickShowDetailPane,
-                        )
-                        composable<TopicPlaceholderRoute> {
-                            TopicDetailPlaceholder()
+                Box(
+                    modifier = Modifier.clipToBounds()
+                        .layout { measurable, constraints ->
+                            val width = max(minPaneWidth.roundToPx(), constraints.maxWidth)
+                            val placeable = measurable.measure(
+                                constraints.copy(
+                                    minWidth = minPaneWidth.roundToPx(),
+                                    maxWidth = width,
+                                ),
+                            )
+                            layout(constraints.maxWidth, placeable.height) {
+                                placeable.placeRelative(
+                                    x = constraints.maxWidth -
+                                        max(constraints.maxWidth, placeable.width),
+                                    y = 0,
+                                )
+                            }
+                        },
+                ) {
+                    AnimatedContent(nestedNavHostStartRoute) { route ->
+                        when (route) {
+                            is TopicRoute -> {
+                                TopicScreen(
+                                    showBackButton = !listDetailNavigator.isListPaneVisible(),
+                                    onBackClick = {
+                                        coroutineScope.launch {
+                                            listDetailNavigator.navigateBack()
+                                        }
+                                    },
+                                    onTopicClick = ::onTopicClickShowDetailPane,
+                                    viewModel = hiltViewModel<TopicViewModel, TopicViewModel.Factory>(
+                                        key = route.id,
+                                    ) { factory ->
+                                        factory.create(route.id)
+                                    }
+                                )
+                            }
+                            is TopicPlaceholderRoute -> {
+                                TopicDetailPlaceholder()
+                            }
                         }
                     }
                 }
             }
+        },
+        paneExpansionState = paneExpansionState,
+        paneExpansionDragHandle = {
+            VerticalDragHandle(
+                modifier = Modifier.paneExpansionDraggable(
+                    state = paneExpansionState,
+                    minTouchTargetSize = LocalMinimumInteractiveComponentSize.current,
+                    interactionSource = mutableInteractionSource,
+                ),
+                interactionSource = mutableInteractionSource,
+            )
         },
     )
 }
